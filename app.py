@@ -8,21 +8,45 @@ import markdown
 import jieba
 import hashlib
 from functools import wraps
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
 # 配置
-DATABASE = 'data/knowledge_base.db'
-app.config['SECRET_KEY'] = 'your-secret-key-here'
+# 数据库配置
+DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///data/knowledge_base.db')
+USE_POSTGRES = DATABASE_URL.startswith('postgres')
+
+# Flask配置
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-production')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
+
+# 生产环境配置
+IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production'
+if IS_PRODUCTION:
+    app.config['DEBUG'] = False
+    app.config['SESSION_COOKIE_SECURE'] = True
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 
 def get_db():
-    """获取数据库连接"""
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """获取数据库连接（支持SQLite和PostgreSQL）"""
+    if USE_POSTGRES:
+        # PostgreSQL连接
+        return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    else:
+        # SQLite连接
+        os.makedirs('data', exist_ok=True)
+        conn = sqlite3.connect('data/knowledge_base.db')
+        conn.row_factory = sqlite3.Row
+        return conn
 
 
 def init_db():
@@ -31,14 +55,24 @@ def init_db():
     cursor = conn.cursor()
 
     # 创建用户表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
+    if USE_POSTGRES:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+    else:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
 
     # 创建默认用户（如果不存在）
     cursor.execute('SELECT COUNT(*) FROM users')
@@ -50,64 +84,94 @@ def init_db():
         print(f"默认用户已创建，用户名: {default_username}, 密码: {default_password}")
 
     # 创建文章表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS articles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            content TEXT NOT NULL,
-            tags TEXT,
-            category TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
+    if USE_POSTGRES:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS articles (
+                id SERIAL PRIMARY KEY,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                tags TEXT,
+                category TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+    else:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS articles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                tags TEXT,
+                category TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
 
     # 创建标签表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS tags (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL
-        )
-    ''')
+    if USE_POSTGRES:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS tags (
+                id SERIAL PRIMARY KEY,
+                name TEXT UNIQUE NOT NULL
+            )
+        ''')
+    else:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL
+            )
+        ''')
 
     # 创建分类表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS categories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL
-        )
-    ''')
+    if USE_POSTGRES:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS categories (
+                id SERIAL PRIMARY KEY,
+                name TEXT UNIQUE NOT NULL
+            )
+        ''')
+    else:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL
+            )
+        ''')
 
-    # 创建全文搜索虚拟表
-    cursor.execute('''
-        CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
-            title, content, content=articles, content_rowid=rowid
-        )
-    ''')
+    # 创建全文搜索虚拟表（仅SQLite）
+    if not USE_POSTGRES:
+        cursor.execute('''
+            CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
+                title, content, content=articles, content_rowid=rowid
+            )
+        ''')
 
-    # 创建全文搜索触发器
-    cursor.execute('''
-        CREATE TRIGGER IF NOT EXISTS articles_ai AFTER INSERT ON articles BEGIN
-            INSERT INTO articles_fts(rowid, title, content)
-            VALUES (new.id, new.title, new.content);
-        END
-    ''')
+        # 创建全文搜索触发器
+        cursor.execute('''
+            CREATE TRIGGER IF NOT EXISTS articles_ai AFTER INSERT ON articles BEGIN
+                INSERT INTO articles_fts(rowid, title, content)
+                VALUES (new.id, new.title, new.content);
+            END
+        ''')
 
-    cursor.execute('''
-        CREATE TRIGGER IF NOT EXISTS articles_ad AFTER DELETE ON articles BEGIN
-            INSERT INTO articles_fts(articles_fts, rowid, title, content)
-            VALUES('delete', old.id, old.title, old.content);
-        END
-    ''')
+        cursor.execute('''
+            CREATE TRIGGER IF NOT EXISTS articles_ad AFTER DELETE ON articles BEGIN
+                INSERT INTO articles_fts(articles_fts, rowid, title, content)
+                VALUES('delete', old.id, old.title, old.content);
+            END
+        ''')
 
-    cursor.execute('''
-        CREATE TRIGGER IF NOT EXISTS articles_au AFTER UPDATE ON articles BEGIN
-            INSERT INTO articles_fts(articles_fts, rowid, title, content)
-            VALUES('delete', old.id, old.title, old.content);
-            INSERT INTO articles_fts(rowid, title, content)
-            VALUES (new.id, new.title, new.content);
-        END
-    ''')
+        cursor.execute('''
+            CREATE TRIGGER IF NOT EXISTS articles_au AFTER UPDATE ON articles BEGIN
+                INSERT INTO articles_fts(articles_fts, rowid, title, content)
+                VALUES('delete', old.id, old.title, old.content);
+                INSERT INTO articles_fts(rowid, title, content)
+                VALUES (new.id, new.title, new.content);
+            END
+        ''')
 
     conn.commit()
     conn.close()
@@ -337,12 +401,23 @@ def search_articles():
 
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('''
-        SELECT articles.* FROM articles
-        JOIN articles_fts ON articles.id = articles_fts.rowid
-        WHERE articles_fts MATCH ?
-        ORDER BY articles.updated_at DESC
-    ''', (query,))
+
+    if USE_POSTGRES:
+        # PostgreSQL使用ILIKE进行模糊搜索
+        cursor.execute('''
+            SELECT * FROM articles
+            WHERE title ILIKE %s OR content ILIKE %s
+            ORDER BY updated_at DESC
+        ''', (f'%{query}%', f'%{query}%'))
+    else:
+        # SQLite使用全文搜索
+        cursor.execute('''
+            SELECT articles.* FROM articles
+            JOIN articles_fts ON articles.id = articles_fts.rowid
+            WHERE articles_fts MATCH ?
+            ORDER BY articles.updated_at DESC
+        ''', (query,))
+
     articles = cursor.fetchall()
     conn.close()
 
@@ -433,18 +508,26 @@ def export_article(article_id):
 
 
 if __name__ == '__main__':
-    # 确保数据目录存在
-    os.makedirs('data', exist_ok=True)
+    # 确保数据目录存在（仅SQLite）
+    if not USE_POSTGRES:
+        os.makedirs('data', exist_ok=True)
 
     # 初始化数据库
     init_db()
+
+    # 获取环境变量配置
+    port = int(os.environ.get('PORT', 5000))
+    host = os.environ.get('HOST', '0.0.0.0')
+    debug = not IS_PRODUCTION
 
     # 运行应用
     print("=" * 50)
     print("个人知识库服务器")
     print("=" * 50)
-    print(f"服务器地址: http://localhost:5000")
+    print(f"数据库: {'PostgreSQL' if USE_POSTGRES else 'SQLite'}")
+    print(f"环境: {'生产环境' if IS_PRODUCTION else '开发环境'}")
+    print(f"地址: http://{host}:{port}")
     print("按 Ctrl+C 停止服务器")
     print("=" * 50)
 
-    app.run(debug=True, port=5000)
+    app.run(host=host, port=port, debug=debug)

@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: knowledge-base
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    plan: free
+    region: oregon # 可改为 singapore
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: FLASK_ENV
+        value: production
+      - key: PORT
+        value: 5000
+    healthCheckPath: /

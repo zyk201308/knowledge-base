@@ -24,11 +24,14 @@ wheels/
 venv/
 env/
 ENV/
+virtualenv/
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
+data/*.db
+data/*.sqlite
 
 # IDE
 .vscode/
@@ -36,13 +39,17 @@ ENV/
 *.swp
 *.swo
 *~
+*.sublime-project
+*.sublime-workspace
 
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Logs
 *.log
+logs/
 
 # Session
 *.session
@@ -50,6 +57,19 @@ Thumbs.db
 # Environment
 .env
 .env.local
+.env.production
 
 # Railway
 railway/
+
+# Docker
+.dockerignore
+
+# Backup
+*.bak
+*.backup
+
+# Temporary files
+tmp/
+temp/
+*.tmp

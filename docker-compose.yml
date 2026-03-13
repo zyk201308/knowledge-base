@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+      - .:/app
+    environment:
+      - FLASK_ENV=development
+      - DATABASE_URL=sqlite:///data/knowledge_base.db
+      - SECRET_KEY=dev-secret-key
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: knowledge_user
+      POSTGRES_PASSWORD: knowledge_password
+      POSTGRES_DB: knowledge_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

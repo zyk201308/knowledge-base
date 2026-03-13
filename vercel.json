@@ -1,0 +1,1 @@
+{"version": 2, "name": "knowledge-base", "builds": [{"src": "app.py", "use": "@vercel/python"}], "routes": [{"src": "/(.*)", "dest": "app.py"}], "env": {"FLASK_ENV": "production", "SECRET_KEY": "@secret-key"}, "build": {"env": {"PIP_REQUIREMENTS_FILE": "requirements.txt"}}}
